@@ -113,34 +113,42 @@ class FDSE_GraphSAGE(nn.Module):
 
         self.dropout = dropout
 
-    def forward(self, x_: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> (torch.Tensor, list):
         """
         FDSE_GraphSAGE 的前向传播。
 
         Args:
-            x_: 节点特征张量。
+            x: 节点特征张量。
             edge_index: 边的索引张量。
 
         Returns:
-            最终的节点嵌入张量。
+            一个元组：
+            - 第一个元素是最终的节点嵌入张量。
+            - 第二个元素是所有中间层的去偏移输出列表。
         """
+        intermediate_outputs = []
+
         # 首层前向传播
-        x_raw, x_deskewed = self.initial_layer(x_, edge_index)
-        x_ = x_deskewed
-        x_ = F.relu(x_)
-        x_ = F.dropout(x_, p=self.dropout, training=self.training)
+        x_raw, x_deskewed = self.initial_layer(x, edge_index)
+        intermediate_outputs.append(x_deskewed)
+        x = x_deskewed
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
 
         # 中间层迭代前向传播
         for layer in self.layers:
-            x_raw, x_deskewed = layer(x_, edge_index)
-            x_ = x_deskewed
-            x_ = F.relu(x_)
-            x_ = F.dropout(x_, p=self.dropout, training=self.training)
+            x_raw, x_deskewed = layer(x, edge_index)
+            intermediate_outputs.append(x_deskewed)
+            x = x_deskewed
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
 
         # 最后一层前向传播
-        x_raw, x_deskewed = self.final_layer(x_, edge_index)
-        x_ = x_deskewed
-        return x_
+        x_raw, x_deskewed = self.final_layer(x, edge_index)
+        # 最后一层通常不包含在正则化中，但为了完整性，我们也可以添加
+        # intermediate_outputs.append(x_deskewed)
+        x = x_deskewed
+        return x, intermediate_outputs
 
 
 class FDSE_ResMLP(nn.Module):

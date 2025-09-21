@@ -154,7 +154,7 @@ def evaluate_all_clients(clients, use_test=False):
 
 if __name__ == "__main__":
     # 1. 配置路径与参数
-    data_dir = "../Parsed_dataset/wd"
+    data_dir = "Parsed_dataset/wd"
     pyg_data_files = sorted([os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith(".pt")])
 
     encoder_params = {
@@ -236,4 +236,3 @@ if __name__ == "__main__":
         client.set_df_extractor_state(best_df_state)
         client.set_ds_eraser_state(best_ds_states[i])
     evaluate_all_clients(clients, use_test=True)
-    

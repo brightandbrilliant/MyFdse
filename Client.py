@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.utils import negative_sampling
 
+# 注意：需要从新的 model.py 文件中导入 FDSE 模型
+from model import FDSE_GraphSAGE, FDSE_ResMLP
+
 
 class Client:
     def __init__(self, client_id, data, encoder, decoder, device='cuda', lr=0.005, weight_decay=1e-4):
@@ -47,9 +50,8 @@ class Client:
             num_neg_samples=pos_edge_index.size(1)
         )
 
-        # 2. 模型前向传播，并同时捕获FDSE层的中间输出和统计量
-        # 我们需要一个自定义的前向传播过程来访问中间层的输出
-        z = self.encoder(self.data.x, self.data.edge_index)
+        # 2. 模型前向传播，得到最终节点嵌入和中间层的输出
+        z, intermediate_outputs = self.encoder(self.data.x, self.data.edge_index)
 
         # 3. 解码器预测边对分数
         pos_pred = self.decoder(z[pos_edge_index[0]], z[pos_edge_index[1]])
@@ -65,17 +67,16 @@ class Client:
 
         # 5. 计算一致性正则化损失 L_Con
         reg_loss = 0
-        # 遍历编码器的每一层，计算损失
-        x = self.data.x
-        for layer in self.encoder.layers:
-            x_raw, x_deskewed = layer(x, self.data.edge_index)
+        # 直接使用model.py返回的中间层输出
+        for i, x_deskewed in enumerate(intermediate_outputs):
 
             # 计算本地DSE输出的均值和方差
             local_mean = x_deskewed.mean(dim=0)
             local_var = x_deskewed.var(dim=0)
 
             # 获取对应的全局DFE统计量
-            layer_name = layer.__class__.__name__  # 简化实现，使用类名作为键
+            # 这里的global_stats需要根据实际的键名来匹配，例如 'layer_0_stats'
+            layer_name = f'layer_{i}_stats'
             if layer_name in self.global_stats:
                 global_mean = self.global_stats[layer_name]['mean'].to(self.device)
                 global_var = self.global_stats[layer_name]['var'].to(self.device)
@@ -87,8 +88,6 @@ class Client:
             # 论文公式 (6)
             reg_loss += (local_mean - global_mean).norm(p=2) ** 2
             reg_loss += (local_var.sqrt() - global_var.sqrt()).norm(p=2) ** 2
-
-            x = x_deskewed
 
         total_loss = task_loss + lambda_reg * reg_loss
 
@@ -163,8 +162,21 @@ class Client:
             state_dict: 服务器聚合后的DFE参数字典。
             global_stats: 服务器聚合后的DFE统计量字典。
         """
-        self.encoder.load_state_dict(state_dict, strict=False)
-        self.decoder.load_state_dict(state_dict, strict=False)
+        # 分别为编码器和解码器准备一个完整的 state_dict
+        encoder_state = self.encoder.state_dict()
+        decoder_state = self.decoder.state_dict()
+
+        # 用服务器提供的DFE参数更新各自的 state_dict
+        for k, v in state_dict.items():
+            if k in encoder_state:
+                encoder_state[k] = v
+            elif k in decoder_state:
+                decoder_state[k] = v
+
+        # 加载更新后的 state_dict
+        self.encoder.load_state_dict(encoder_state, strict=True)
+        self.decoder.load_state_dict(decoder_state, strict=True)
+
         if global_stats:
             self.global_stats = global_stats
 
@@ -172,5 +184,17 @@ class Client:
         """
         设置DSE模块的参数状态，从服务器接收个性化模型。
         """
-        self.encoder.load_state_dict(state_dict, strict=False)
-        self.decoder.load_state_dict(state_dict, strict=False)
+        # 分别为编码器和解码器准备一个完整的 state_dict
+        encoder_state = self.encoder.state_dict()
+        decoder_state = self.decoder.state_dict()
+
+        # 用服务器提供的DSE参数更新各自的 state_dict
+        for k, v in state_dict.items():
+            if k in encoder_state:
+                encoder_state[k] = v
+            elif k in decoder_state:
+                decoder_state[k] = v
+
+        # 加载更新后的 state_dict
+        self.encoder.load_state_dict(encoder_state, strict=True)
+        self.decoder.load_state_dict(decoder_state, strict=True)
