@@ -105,7 +105,8 @@ class Client:
         self.decoder.eval()
 
         with torch.no_grad():
-            z = self.encoder(self.data.x, self.data.edge_index)
+            # 修正: 确保只接收最终嵌入张量
+            z, _ = self.encoder(self.data.x, self.data.edge_index)
 
             if use_test:
                 pos_edge_index = self.data.test_pos_edge_index
